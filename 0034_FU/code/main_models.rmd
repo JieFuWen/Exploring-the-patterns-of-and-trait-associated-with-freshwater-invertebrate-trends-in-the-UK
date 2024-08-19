@@ -1,0 +1,533 @@
+---
+title: "Exploring the patterns of and trait associated with freshwater invertebrate trends in the UK"
+author: "WenJie Fu"
+date: "2024-06-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(MASS)
+library(mgcv)
+library(randomForest)
+library(e1071)
+library(openxlsx)
+library(tidyverse)
+
+remove.packages("ggplot2")
+install.packages("https://cran.r-project.org/src/contrib/Archive/ggplot2/ggplot2_3.4.2.tar.gz", repos = NULL, type = "source")
+library(ggplot2)
+library(taxize)
+```
+```{r}
+
+data<-read.csv("/Users/fuwenjie/Desktop/hypothesis1/traits/six_group.csv")
+#data<-read.csv("six_group.csv")
+
+```
+
+```{r eval=FALSE, include=FALSE}
+
+# Install and load the required R packages
+library(ggplot2)
+library(dplyr)
+library(readr)
+
+# Defining the data catalogue
+data_dir <- "D:/BaiduNetdiskDownload/1970-2015/SUMMARY_TABLES"
+
+# Get a list of all CSV files
+files <- list.files(data_dir, pattern = "*.csv", full.names = TRUE)
+
+# Define a function to extract the group name
+get_group_name <- function(file_path) {
+  species_name <- basename(file_path)
+  species_name <- gsub("AnnualSpeciesOccupancy_SummaryTable_", "", species_name)
+  group_name <- unlist(strsplit(species_name, "_"))[1]
+  return(group_name)
+}
+# Define the group of interest
+groups_of_interest <- c("AquaticBugs", "Caddisflies", "Dragonflies", "Mayflies", "NonmarineMolluscs", "Stoneflies")
+# Create a list to store all the data
+all_data <- list()
+# Read all files and extract group names
+for (file in files) {
+  group_name <- get_group_name(file)
+  if (group_name %in% groups_of_interest) {
+    redata <- read_csv(file)
+    redata$Group <- group_name
+    all_data[[length(all_data) + 1]] <- redata
+  }
+}
+# Consolidation of all data
+combined_data <- bind_rows(all_data)
+
+# Extract data from the merged data for the six groups of interest
+filtered_data <- combined_data %>% filter(Group %in% groups_of_interest)
+
+# Calculate the mean of different species in the same year in each broad category
+grouped_data <- filtered_data %>%
+  group_by(Group, Year, Region) %>%
+  summarize(Mean_Occupancy = mean(Mean, na.rm = TRUE)) %>%
+  ungroup()
+write.csv(filtered_data,file = 'six_group.csv')
+# Iterate through each group and generate a chart
+unique_groups <- unique(grouped_data$Group)
+for (group in unique_groups) {
+  group_data <- grouped_data %>% filter(Group == group)
+  
+  # Ensure that year data are integers and sorted by region and year
+  group_data <- group_data %>% mutate(Year = as.integer(Year)) %>% arrange(Region, Year)
+  
+  # Plotting the distribution of group over time in different regions
+  plot <- ggplot(group_data, aes(x = Year, y = Mean_Occupancy, color = Region)) +
+    geom_line() +        
+    geom_point() +        
+    ggtitle(paste("Group Distribution Over Years by Region:", group)) +
+    xlab("Year") +
+    ylab("Mean Occupancy") +
+    theme_minimal() +
+    theme(legend.position = "none") 
+  
+  # Save charts as high-resolution PDFs
+  ggsave(filename = paste0("pdf_plots/", group, "_distribution_by_region2.pdf"), plot = plot, width = 12, height = 8, dpi = 300)
+}
+getwd()
+
+```
+
+```{r}
+library(gridExtra)
+#trend
+data$Year <- as.integer(data$Year)
+
+# select years : 1970-2015
+filtered_data <- subset(data, Year >= 1970 & Year <= 2015)
+
+# Calculate the average value for each Group for each year, sorted by year and Group
+mean_values <- filtered_data %>%
+  group_by(Year, Group) %>%
+  summarise(mean_value = mean(Mean, na.rm = TRUE))
+
+p <- ggplot(mean_values, aes(x = Year, y = mean_value, color = Group)) +
+  geom_line(size = 1) +
+  labs(title = "Average Value Trend from 1970 to 2015 by Group",
+       x = "Year",
+       y = "Average Value",
+       color = "Group") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 6, face = "bold"),
+    axis.title.x = element_text(size = 5),
+    axis.title.y = element_text(size = 5),
+    axis.text = element_text(size = 5),
+    legend.title = element_text(size = 5),
+    legend.text = element_text(size = 6),
+    panel.grid.major = element_line(color = "gray", size = 0.5),
+    panel.grid.minor = element_line(color = "gray", size = 0.25)
+  ) +
+  scale_color_brewer(palette = "Set1")
+print(p)
+
+# get only Group
+groups <- unique(mean_values$Group)
+
+colors <- c("blue", "red", "green", "purple", "orange", "brown")
+
+# creat every Group list
+plots <- list()
+for (i in 1:length(groups)) {
+  group <- groups[i]
+  group_data <- subset(mean_values, Group == group)
+  p <- ggplot(group_data, aes(x = Year, y = mean_value)) +
+    geom_line(size = 1, color = colors[i %% length(colors) + 1]) +
+    labs(title = paste("Average Value Trend from 1970 to 2015 for Group", group),
+         x = "Year",
+         y = "Average Value") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 5, face = "bold"),
+      axis.title.x = element_text(size = 5),
+      axis.title.y = element_text(size = 5),
+      axis.text = element_text(size = 6),
+      panel.grid.major = element_line(color = "gray", size = 0.5),
+      panel.grid.minor = element_line(color = "gray", size = 0.25)
+    )
+  plots[[i]] <- p
+}
+grid.arrange(grobs = plots, ncol = 3)
+
+ggsave("average_value_trend_groups.png", plot = grid.arrange(grobs = plots, ncol = 3), width = 15, height = 10, dpi = 300)
+```
+
+# Data Dealing
+
+```{r eval=FALSE, include=FALSE}
+#setwd("/Users/fuwenjie/Desktop/hypothesis1/traits")
+file1<-read.csv("Freshwaterecology.info-6.csv")
+file1<-read.csv("Freshwaterecology.info-6.csv",)
+file3 <- read.csv("Freshwaterecology.info-temperature preference (KLIWA).csv", skip = 20)
+file4 <- read.csv("Freshwaterecology.info-tolerance score.csv", skip = 20)
+data <- read.xlsx("Species_Trends.xlsx")
+file1<-file1[,c(4:5)]
+file3<-file3[,c(4:6)]
+file4<-file4[,c(4:9)]
+
+# create a new column toc
+file4=file4%>%
+  mutate(toc = case_when(
+    tol == 1 ~ 5,
+    mtol == 1 ~ 4,
+    msen == 1 ~ 3,
+    sen == 1 ~ 2,
+    hsen == 1 ~ 1,
+    TRUE ~ NA_real_  
+  ))
+
+file4=file4[,-c(2:6)]
+
+selected_species <- data[data$Group %in% 
+                           c("AquaticBugs", "Caddisflies", "Dragonflies", "Mayflies", "NonmarineMolluscs", "Stoneflies"), ]
+```
+
+```{r eval=FALSE, include=FALSE}
+# Function to resolve species names
+resolve_species_names <- function(species_names) {
+  resolved_names <- gnr_resolve(names = species_names)
+  matched_species <- resolved_names[, c("user_supplied_name", "matched_name")]
+  colnames(matched_species) <- c("Original_Species", "Matched_Species")
+  unique(matched_species)
+}
+# Add progress bar to the name resolution process
+# Function to resolve species names
+resolve_species_names <- function(species_names) {
+  resolved_names <- gnr_resolve(names = species_names)
+  matched_species <- resolved_names[, c("user_supplied_name", "matched_name")]
+  colnames(matched_species) <- c("Original_Species", "Matched_Species")
+  unique(matched_species)
+}
+
+# Resolve species names in file1, file3, and file4
+resolved_file1 <- resolve_species_names(file1$Taxon)
+resolved_file3 <- resolve_species_names(file3$Taxon)
+resolved_file4 <- resolve_species_names(file4$Taxon)
+
+
+colnames(resolved_file1 )=c("Original_Species1","Matched_Species")
+resolved_file1=unique(resolved_file1)
+
+mat=resolved_file1%>%left_join(resolved_file3 ,by="Matched_Species")
+mat1=unique(mat[,c(1,3)])
+mat1=na.omit(mat1)
+
+for(i in 1:nrow(file3)){
+  file3$Taxon[i]=mat1[mat1$Original_Species1==file3$Taxon[i],1]
+}
+# Merge files based on the updated Taxon column
+merged_data <- merge(file1, file3, by = "Taxon")
+colnames(resolved_file4 )=c("Original_Species2","Matched_Species")
+resolved_file4=unique(resolved_file4)
+
+mat=resolved_file1%>%left_join(resolved_file4 ,by="Matched_Species")
+mat1=unique(mat[,c(1,3)])
+mat1=na.omit(mat1)
+
+for(i in 1:nrow(file4)){
+  file4$Taxon[i]=mat1[mat1$Original_Species2==file4$Taxon[i],1]
+}
+
+merged_data <- merge(merged_data, file4, by = "Taxon")
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+temp <- gnr_resolve(names = selected_species$Species)
+
+matched_species <- temp[,c(1,3)]
+
+colnames(matched_species )=c("Original_Species","Matched_Species")
+matched_species=unique(matched_species)
+
+temp1 <- gnr_resolve(names = merged_data$Taxon)
+
+# Combine the original species name with the matched name
+matched_species1 <- temp1[,c(1,3)]
+
+colnames(matched_species1 )=c("Original_Species1","Matched_Species")
+matched_species1=unique(matched_species1)
+
+mat=matched_species%>%left_join(matched_species1,by="Matched_Species")
+mat1=unique(mat[,c(1,3)])
+mat1=na.omit(mat1)
+
+for(i in 1:nrow(merged_data)){
+  merged_data$Taxon[i]=mat1[mat1$Original_Species1==merged_data$Taxon[i],1]
+}
+# Merge using updated species names
+final <- merge(selected_species, merged_data, by.x = "Species", by.y = "Taxon")
+```
+
+```{r eval=FALSE, include=FALSE}
+
+library(mice) 
+
+# Impute the remaining missing values using mice package
+imputed_data <- mice(final, method = "pmm",m = 5, maxit = 5, seed = 500)
+
+# Create a completed dataset by using the first imputed dataset (out of 5 generated)
+final_completed <- complete(imputed_data, 1)
+
+final_completed<-na.omit(final_completed)
+     
+
+
+# Define a function to check if a column is constant
+is_constant <- function(column) {
+  return(length(unique(column)) == 1)
+}
+
+# Find columns that are not constant
+non_constant_columns <- sapply(final_completed, function(col) !is_constant(col))
+
+# Subset the dataframe to keep only non-constant columns
+final_completed <- final_completed[, non_constant_columns]
+
+summary(final_completed)
+
+save(final_completed,file="final_completed.rdata")
+```
+
+
+
+# EDA
+```{r}
+setwd("/Users/fuwenjie/Desktop/hypothesis1/traits")
+load("final_completed.rdata")
+six_group<-read.csv("/Users/fuwenjie/Desktop/hypothesis1/traits/six_group.csv")
+
+#six_group<-read.csv("six_group.csv")
+six_group1<-six_group[,c(3,5,6)]
+final_completed<-final_completed%>%rename("Year"="First_Year")
+
+final<-final_completed%>%left_join(six_group1,by=c("Species","Year"))
+```
+
+```{r}
+ggplot(final, aes(x = Mean, y = Group)) +
+  geom_boxplot() +  
+  geom_vline(xintercept = 0, linetype = "dashed") + 
+  labs(x = "trend", y = "Group") +  
+  theme_minimal()  
+```
+
+```{r fig.width=8,fig.height=8}
+setwd("/Users/fuwenjie/Desktop/hypothesis1/traits")
+load("final_completed.rdata")
+library(corrplot)
+
+# Select only numeric columns from the dataframe
+numeric_columns <- final_completed[, c("Mean_growth_rate","N_Years", "N_Records", "acid.class", "focus.temp", "specificity", "toc")]
+
+# Calculate the correlation matrix
+cor_matrix <- cor(numeric_columns, use = "complete.obs")
+
+# Plot the correlation matrix with correlation values
+corrplot(cor_matrix, method = "number", type = "upper", 
+         tl.col = "black", tl.srt = 45, addCoef.col = "black",number.cex=0.7, col = COL2('PiYG'))
+
+```
+
+# Modeling
+
+```{r}
+# Set up plotting parameters to display 4 plots simultaneously
+par(mfrow=c(2,2))
+
+# Specify the independent variables for the model
+independent_vars <- c("acid.class", "focus.temp", "specificity", "toc")
+
+# Specify the species
+species_list <- c("AquaticBugs", "Caddisflies", "Dragonflies", "Mayflies", "NonmarineMolluscs", "Stoneflies")
+
+# Perform regression analysis for each species separately
+for (species in species_list) {
+  cat("\n")
+  cat(paste("#######################################species=",species,"########################################"))
+  # Filter data for the specific species
+  species_data <- final_completed[final_completed$Group == species,]
+  
+  # Select the column name of the constant term
+  one_column<-species_data %>%
+  summarise(across(everything(), ~ n_distinct(.) == 1)) %>%
+  pivot_longer(cols = everything(), names_to = "column", values_to = "is_constant") %>%
+  filter(is_constant) %>%
+  pull(column)
+  
+  
+  # Model with Mean_growth_rate as the response variable
+  formula_mean_growth_rate <- as.formula(paste("Mean_growth_rate ~", paste(setdiff(independent_vars,one_column), collapse = " + "), sep = " "))
+  model_mean_growth_rate <- step(lm(formula_mean_growth_rate, data = species_data), trace = FALSE)
+  print(summary(model_mean_growth_rate))
+  plot(model_mean_growth_rate)
+  
+}
+
+```
+
+
+
+```{r}
+
+par(mfrow=c(2,2))
+# Perform regression analysis on the combined data for all species
+# Model with Mean_growth_rate as the response variable
+formula_mean_growth_rate_all <- as.formula(paste("Mean_growth_rate ~", paste(independent_vars, collapse = " + "), sep = " "))
+model_mean_growth_rate_all <- step(lm(formula_mean_growth_rate_all, data = final_completed), trace = FALSE)
+print(summary(model_mean_growth_rate_all))
+plot(model_mean_growth_rate_all)
+
+# Reset plotting parameters
+par(mfrow=c(1,1))
+```
+
+# pic
+### for mean as y
+```{r}
+library(broom)
+
+# Select variables to include in the regression model
+variables_to_plot <- c("acid.class", "focus.temp", "specificity", "toc")
+
+# Fit the regression model
+regression_formula <- as.formula(paste("Mean ~", paste(variables_to_plot, collapse = " + ")))
+regression_model <- lm(regression_formula, data = final)
+
+# Get the coefficients and confidence intervals
+regression_results <- tidy(regression_model, conf.int = TRUE)
+regression_results
+
+# Filter results to include only the variables of interest
+regression_results <- regression_results %>%
+  filter(term %in% variables_to_plot)
+
+ggplot(regression_results, aes(x = estimate, y = term)) +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +  # Draw horizontal error bars for confidence intervals
+  geom_point(size = 2) +  # Draw points for the estimates
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +  # Add dashed line at x = 0
+  labs(x = "Coefficient", y = "Variable", title = "Regression Coefficients and 95% Confidence Intervals") +  # Set axis labels
+    theme_classic()+  
+  theme(text = element_text(family = "STKaiti"))  
+
+
+#----
+# Converting the acid.class variable to a factor
+final$acid.class <- as.factor(final$acid.class)
+
+# Creating Linear Models
+lm_model <- lm(Mean ~ acid.class, data = final)
+summary(lm_model)
+
+# ANOVA analyses were performed
+anova_results <- anova(lm_model)
+print(anova_results)
+
+# Visualising results using box-and-line diagrams
+ggplot(final, aes(x = acid.class, y = Mean, fill = acid.class)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Mean by acid.class",
+       x = "acid.class",
+       y = "Mean") +
+  theme_minimal()
+
+tukey_results <- TukeyHSD(aov(lm_model))
+print(tukey_results)
+plot(tukey_results)
+```
+
+
+
+```{r fig.height=10,fig.width=10}
+
+variables_to_plot <- regression_results$term
+
+library(patchwork)
+# Create a list to store the plots
+plot_list <- list()
+
+for (variable in variables_to_plot) {
+  p <- ggplot(final, aes_string(x = variable, y = "Mean")) +
+    geom_point(color = "black") +  # Draw black points
+    geom_smooth(method = "lm", color = "blue", fill = "blue", alpha = 0.2,se = T) +  # Add blue regression line with confidence interval
+    geom_hline(yintercept = 0, linetype = "dashed") +  # Add dashed horizontal line at y = 0
+    labs(x = variable, y = "trend") +  # Set axis labels
+    theme_classic() +  
+    theme(text = element_text(family = "STKaiti"))  # Use specific font
+  plot_list[[variable]] <- p
+}
+
+# Arrange all plots using patchwork
+final_plot <- wrap_plots(plot_list, ncol = 3)
+
+# Display the final plot
+print(final_plot)
+```
+
+
+```{r}
+
+# Converting toc variables to factors
+final$toc <- as.factor(final$toc)
+
+# Creating Linear Models
+lm_model <- lm(Mean ~ toc, data = final)
+summary(lm_model)
+
+# ANOVA analyses were performed
+anova_results <- anova(lm_model)
+print(anova_results)
+
+# Visualising results using box-and-line diagrams
+ggplot(final, aes(x = toc, y = Mean, fill = toc)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Mean by toc",
+       x = "toc",
+       y = "Mean") +
+  theme_minimal()
+
+tukey_results <- TukeyHSD(aov(lm_model))
+print(tukey_results)
+plot(tukey_results)
+
+```
+
+```{r}
+setwd("/Users/fuwenjie/Desktop/hypothesis1/traits")
+file5=read.csv("Freshwaterecology.info-7.csv",skip=20)
+file5_long <- file5 %>%
+  pivot_longer(cols = c(x, o, b, a, p), names_to = "Category", values_to = "Value")
+
+file5_proportions <- file5_long %>%
+  group_by(Taxagroup, Category) %>%
+  summarise(Total = sum(Value, na.rm = TRUE)) %>%
+  mutate(Proportion = Total / sum(Total))
+
+custom_colors <- c("x" = "#1f77b4", "o" = "#ff7f0e", "b" = "#2ca02c", "a" = "#d62728", "p" = "#9467bd")
+
+ggplot(file5_proportions, aes(x = Taxagroup, y = Proportion, fill = Category)) +
+  geom_bar(stat = "identity", position = "fill") +
+  geom_text(aes(label = scales::percent(Proportion, accuracy = 0.01)), 
+            position = position_fill(vjust = 0.5), size = 3) +
+  labs(title = "Proportion of x, o, b, a, and p by Taxagroup",
+       x = "Taxagroup", 
+       y = "Proportion") +
+  theme_minimal() +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = custom_colors) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
